@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: db_cbt
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+      TZ: Asia/Jakarta
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    command: >
+      postgres -c shared_buffers=2GB -c work_mem=32MB -c max_connections=300
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${DB_USER} -d $${DB_NAME}" ]
+      interval: 10s
+      retries: 5
+      timeout: 5s
+    networks:
+      - cbt_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.90'
+          memory: 4G
+
+  cbt_app:
+    build:
+      context: ./cbt
+      dockerfile: Dockerfile
+    container_name: app_cbt
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    volumes:
+      - cbt_storage_data:/app/storage
+    networks:
+      - cbt_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 4G
+        reservations:
+          cpus: '0.25'
+          memory: 1G
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared_tunnel_cbt
+    restart: always
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARED_TOKEN}
+      - TZ=Asia/Jakarta
+    networks:
+      - cbt_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
+
+volumes:
+  pg_data:
+  cbt_storage_data:
+
+networks:
+  cbt_net:
+    driver: bridge
